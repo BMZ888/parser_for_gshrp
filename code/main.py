@@ -26,7 +26,7 @@ def run_parser():
             return
             
         # УБЕРИ/измени для полного парсинга
-        category_links = category_links[:1]
+        # category_links = category_links[:1]
         
         total_saved_count = 0
         print(f"\nНачинаю парсинг {len(category_links)} категорий...")
