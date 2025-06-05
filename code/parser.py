@@ -45,36 +45,103 @@ def get_category_links(driver):
     print(f"Найдено {len(links)} уникальных ТОП-уровневых категорий.")
     return list(links)
 
+# code/parser.py
+
+# ... (импорты в начале файла: json, time, random, selenium, bs4)
+
+# ... (функции get_driver, get_page_soup_selenium, get_category_links)
+
 def parse_product_card(card_soup):
-    # ... Эта функция остается АБСОЛЮТНО без изменений, как в прошлом сообщении ...
-    # (Скопируй ее сюда из предыдущего ответа)
-    data = {'url': None,'title': None,'product_id': None,'gold_price': None, 'retail_price': None, 'unit': None,'categories': [],'features': {}, 'raw_html': str(card_soup)}
-    link_tag = card_soup.find('a', attrs={'data-test': 'product-link'}); title_tag = card_soup.find('span', attrs={'data-test': 'product-title'}); code_tag = card_soup.find('p', attrs={'data-test': 'product-code'})
-    if link_tag and link_tag.has_attr('href'): data['url'] = BASE_URL + link_tag['href']
-    if title_tag: data['title'] = title_tag.text.strip()
+    """
+    ФИНАЛЬНАЯ ВЕРСИЯ.
+    Парсит ОДНУ карточку товара, извлекая всю доступную информацию.
+    """
+    # 1. Инициализация словаря с данными
+    data = {
+        'url': None,
+        'title': None,
+        'product_id': None,
+        'gold_price': None,      # Цена по карте
+        'retail_price': None,    # Розничная цена
+        'unit': None,            # Единица измерения (шт, м2 и т.д.)
+        'categories': [],
+        'features': {},
+        'raw_html': str(card_soup) # Сохраняем весь HTML карточки для отладки
+    }
+
+    # 2. Извлечение основных данных
+    
+    # Ссылка
+    link_tag = card_soup.find('a', attrs={'data-test': 'product-link'})
+    if link_tag and link_tag.has_attr('href'):
+        data['url'] = BASE_URL + link_tag['href']
+    
+    # Название
+    title_tag = card_soup.find('span', attrs={'data-test': 'product-title'})
+    if title_tag:
+        data['title'] = title_tag.text.strip()
+    
+    # ID товара (артикул)
+    code_tag = card_soup.find('p', attrs={'data-test': 'product-code'})
     if code_tag:
-        try: data['product_id'] = int(code_tag.text.strip())
-        except: pass
+        try:
+            data['product_id'] = int(code_tag.text.strip())
+        except (ValueError, IndexError):
+            pass # Если не удалось, product_id останется None
+
+    # 3. Извлечение цен и единицы измерения
+    
+    # Цена по "золотой" карте
     gold_price_tag = card_soup.find('p', attrs={'data-test': 'product-gold-price'})
     if gold_price_tag:
-        price_str = gold_price_tag.get_text(strip=True).replace('₽', '').replace('\u2009', '').replace(',', '.');_ = price_str
-        try: data['gold_price'] = float(price_str)
-        except: pass
+        # get_text() соединеняет текст из всех вложенных тегов
+        price_str = gold_price_tag.get_text(strip=True).replace('₽', '').replace('\u2009', '').replace(',', '.')
+        try:
+            data['gold_price'] = float(price_str)
+        except (ValueError, TypeError):
+            pass
+
+    # Розничная цена (обычная)
     retail_price_tag = card_soup.find('p', attrs={'data-test': 'product-retail-price'})
     if retail_price_tag:
-        price_str = retail_price_tag.get_text(strip=True).replace('₽', '').replace('\u2009', '').replace(',', '.');_ = price_str
-        try: data['retail_price'] = float(price_str)
-        except: pass
+        price_str = retail_price_tag.get_text(strip=True).replace('₽', '').replace('\u2009', '').replace(',', '.')
+        try:
+            data['retail_price'] = float(price_str)
+        except (ValueError, TypeError):
+            pass
+            
+    # Единица измерения (очень важный параметр для цены)
+    # Находим активный таб с единицей измерения
     active_unit_tag = card_soup.find('div', class_=lambda c: c and 'tab-active' in c and 'price-switcher-tab' in c)
-    if active_unit_tag: data['unit'] = active_unit_tag.get_text(strip=True)
+    if active_unit_tag:
+        data['unit'] = active_unit_tag.get_text(strip=True)
+
+    # 4. Извлечение категорий и характеристик
+
+    # "Хлебные крошки" (категории)
     breadcrumbs_div = card_soup.find('div', attrs={'data-test': 'product-breadcrumbs'})
-    if breadcrumbs_div: data['categories'] = [cat.get_text(strip=True) for cat in breadcrumbs_div.find_all('a')]
+    if breadcrumbs_div:
+        data['categories'] = [cat.get_text(strip=True) for cat in breadcrumbs_div.find_all('a')]
+
+    # Характеристики
     description_p = card_soup.find('p', attrs={'data-test': 'product-description'})
     if description_p:
-        for br in description_p.find_all('br'): br.replace_with('|||')
-        features_list = [item.strip() for item in description_p.get_text(strip=True).split('|||') if item.strip()]
+        # Преобразуем <br> в специальный разделитель, чтобы потом разбить строку
+        for br in description_p.find_all('br'):
+            br.replace_with('|||')
+        
+        # Получаем текст и разбиваем на отдельные характеристики
+        full_text = description_p.get_text(strip=True)
+        features_list = [item.strip() for item in full_text.split('|||') if item.strip()]
+        
         for feature_item in features_list:
-            if ':' in feature_item: key, value = feature_item.split(':', 1); data['features'][key.strip()] = value.strip()
+            if ':' in feature_item:
+                key, value = feature_item.split(':', 1)
+                data['features'][key.strip()] = value.strip()
+    
+    # 5. Сериализация сложных полей в JSON для сохранения в БД
     data['features'] = json.dumps(data['features'], ensure_ascii=False)
     data['categories'] = json.dumps(data['categories'], ensure_ascii=False)
+
     return data
+
