@@ -17,10 +17,13 @@ env/
 # macOS
 .DS_Store
 
+documents
 # Data files
 # Если база данных будет большой, ее тоже лучше игнорировать.
 # Но для нашего проекта пока можно ее оставить, чтобы она была в репозитории.
+data
 data/
+data/completed_categories.txt
 # Temporary files & logs
 path
 *.log
