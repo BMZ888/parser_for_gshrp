@@ -11,38 +11,39 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 
 BASE_URL = "https://moscow.petrovich.ru"
-
 def get_driver():
     """
-    Настраивает и возвращает экземпляр веб-драйвера.
-    Приоритетно использует Яндекс.Браузер, если путь к нему указан в .env файле.
-    В противном случае, использует Google Chrome по умолчанию.
+    Настраивает и возвращает экземпляр веб-драйвера для Яндекс.Браузера,
+    используя правильную версию chromedriver.
     """
     load_dotenv()
-
     options = Options()
     options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_argument("user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36")
-    prefs = {"profile.managed_default_content_settings.images": 2}
-    options.add_experimental_option("prefs", prefs)
-
-    yandex_path = os.getenv('YANDEX_BROWSER_PATH')
+    options.add_argument("user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36")
     
+    # --- БЛОК РАБОТЫ С ЯНДЕКС.БРАУЗЕРОМ ---
+    yandex_path = os.getenv('YANDEX_BROWSER_PATH')
     if yandex_path and os.path.exists(yandex_path):
         print("Найден путь к Яндекс.Браузеру. Использую его.")
         options.binary_location = yandex_path
     else:
-        print("Путь к Яндекс.Браузеру не найден или некорректен. Использую Google Chrome по умолчанию.")
+        print("Путь к Яндекс.Браузеру в .env не найден или неверен. Запуск может не удаться.")
+        # Можно завершить работу, если Яндекс.Браузер обязателен
+        # return None
+    
+    # --- УКАЗЫВАЕМ ВЕРСИЮ ДРАЙВЕРА ---
+    driver_version = os.getenv('CHROME_DRIVER_VERSION')
+    if not driver_version:
+        print("Версия драйвера CHROME_DRIVER_VERSION не найдена в .env. Менеджер попробует угадать.")
 
     try:
-        # ## >> ИСПРАВЛЕНО
-        # Используем имя "Service", как оно импортировано в начале файла.
-        service = Service(executable_path=ChromeDriverManager().install())
+        # Передаем версию напрямую в ChromeDriverManager
+        service = Service(executable_path=ChromeDriverManager(driver_version=driver_version).install())
         driver = webdriver.Chrome(service=service, options=options)
         return driver
     except Exception as e:
         print(f"Критическая ошибка при инициализации драйвера: {e}")
-        print("Убедитесь, что у вас установлен совместимый браузер (Yandex или Google Chrome).")
+        print("\nУбедитесь, что версия CHROME_DRIVER_VERSION в .env файле соответствует версии вашего Яндекс.Браузера.")
         return None
     
 
