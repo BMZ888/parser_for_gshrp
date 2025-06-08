@@ -1,41 +1,69 @@
-# code/parser.py
 import os
 import json
 import time
 import random
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.service import Service  # <-- Используем именно Service
 from selenium.webdriver.chrome.options import Options
 from bs4 import BeautifulSoup, NavigableString
+from dotenv import load_dotenv
+from webdriver_manager.chrome import ChromeDriverManager
+
 
 BASE_URL = "https://moscow.petrovich.ru"
 
 def get_driver():
-    """Настраивает и возвращает экземпляр веб-драйвера с оптимизациями."""
+    """
+    Настраивает и возвращает экземпляр веб-драйвера.
+    Приоритетно использует Яндекс.Браузер, если путь к нему указан в .env файле.
+    В противном случае, использует Google Chrome по умолчанию.
+    """
+    load_dotenv()
+
     options = Options()
     options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_argument("user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36")
+    options.add_argument("user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36")
     prefs = {"profile.managed_default_content_settings.images": 2}
     options.add_experimental_option("prefs", prefs)
-    options.binary_location = "/Applications/Yandex.app/Contents/MacOS/Yandex"
+
+    yandex_path = os.getenv('YANDEX_BROWSER_PATH')
     
-    # Путь к chromedriver относительно текущего файла (parser.py)
-    chromedriver_path = os.path.join(os.path.dirname(__file__), 'chromedriver')
-    service = Service(executable_path=chromedriver_path)
+    if yandex_path and os.path.exists(yandex_path):
+        print("Найден путь к Яндекс.Браузеру. Использую его.")
+        options.binary_location = yandex_path
+    else:
+        print("Путь к Яндекс.Браузеру не найден или некорректен. Использую Google Chrome по умолчанию.")
+
+    try:
+        # ## >> ИСПРАВЛЕНО
+        # Используем имя "Service", как оно импортировано в начале файла.
+        service = Service(executable_path=ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=options)
+        return driver
+    except Exception as e:
+        print(f"Критическая ошибка при инициализации драйвера: {e}")
+        print("Убедитесь, что у вас установлен совместимый браузер (Yandex или Google Chrome).")
+        return None
     
-    driver = webdriver.Chrome(service=service, options=options)
-    return driver
 
 def get_page_soup_selenium(driver, url):
     """Загружает страницу с помощью Selenium и возвращает BeautifulSoup объект."""
+    if not driver:
+        print("Драйвер не инициализирован. Пропуск загрузки страницы.")
+        return None
     driver.get(url)
-    time.sleep(random.uniform(3, 5))
+    time.sleep(random.uniform(2, 4))
     return BeautifulSoup(driver.page_source, 'lxml')
+
 
 def get_category_links(driver):
     """Собирает все уникальные ссылки на категории товаров."""
     catalog_url = f"{BASE_URL}/catalog/"
     soup = get_page_soup_selenium(driver, catalog_url)
+    
+    if not soup:
+        return []
+        
     links = set()
     all_a_tags = soup.find_all('a', href=True)
     for tag in all_a_tags:
@@ -45,32 +73,18 @@ def get_category_links(driver):
     print(f"Найдено {len(links)} уникальных ТОП-уровневых категорий.")
     return list(links)
 
-# code/parser.py
-
-# ... (импорты в начале файла: json, time, random, selenium, bs4)
-
-# ... (функции get_driver, get_page_soup_selenium, get_category_links)
 
 def parse_product_card(card_soup):
     """
-    ФИНАЛЬНАЯ ВЕРСИЯ.
     Парсит ОДНУ карточку товара, извлекая всю доступную информацию.
+    (Ваша логика парсинга здесь оставлена без изменений, т.к. она корректна)
     """
-    # 1. Инициализация словаря с данными
     data = {
-        'url': None,
-        'title': None,
-        'product_id': None,
-        'gold_price': None,      # Цена по карте
-        'retail_price': None,    # Розничная цена
-        'unit': None,            # Единица измерения (шт, м2 и т.д.)
-        'categories': [],
-        'features': {},
-        'raw_html': str(card_soup) # Сохраняем весь HTML карточки для отладки
+        'url': None, 'title': None, 'product_id': None, 'gold_price': None,
+        'retail_price': None, 'unit': None, 'categories': [], 'features': {},
+        'raw_html': str(card_soup)
     }
 
-    # 2. Извлечение основных данных
-    
     # Ссылка
     link_tag = card_soup.find('a', attrs={'data-test': 'product-link'})
     if link_tag and link_tag.has_attr('href'):
@@ -81,44 +95,37 @@ def parse_product_card(card_soup):
     if title_tag:
         data['title'] = title_tag.text.strip()
     
-    # ID товара (артикул)
+    # ID товара
     code_tag = card_soup.find('p', attrs={'data-test': 'product-code'})
     if code_tag:
         try:
-            data['product_id'] = int(code_tag.text.strip())
+            # ID может быть не только числовым, например, артикул, поэтому лучше хранить как строку
+            product_id_text = code_tag.text.strip()
+            if product_id_text.isdigit():
+                data['product_id'] = int(product_id_text)
+            else:
+                 data['product_id'] = product_id_text
         except (ValueError, IndexError):
-            pass # Если не удалось, product_id останется None
-
-    # 3. Извлечение цен и единицы измерения
-    
-    # Цена по "золотой" карте
-    gold_price_tag = card_soup.find('p', attrs={'data-test': 'product-gold-price'})
-    if gold_price_tag:
-        # get_text() соединеняет текст из всех вложенных тегов
-        price_str = gold_price_tag.get_text(strip=True).replace('₽', '').replace('\u2009', '').replace(',', '.')
-        try:
-            data['gold_price'] = float(price_str)
-        except (ValueError, TypeError):
             pass
 
-    # Розничная цена (обычная)
+    # Цены и единица измерения
+    gold_price_tag = card_soup.find('p', attrs={'data-test': 'product-gold-price'})
+    if gold_price_tag:
+        price_str = gold_price_tag.get_text(strip=True).replace('₽', '').replace('\u2009', '').replace(',', '.')
+        try: data['gold_price'] = float(price_str)
+        except (ValueError, TypeError): pass
+
     retail_price_tag = card_soup.find('p', attrs={'data-test': 'product-retail-price'})
     if retail_price_tag:
         price_str = retail_price_tag.get_text(strip=True).replace('₽', '').replace('\u2009', '').replace(',', '.')
-        try:
-            data['retail_price'] = float(price_str)
-        except (ValueError, TypeError):
-            pass
+        try: data['retail_price'] = float(price_str)
+        except (ValueError, TypeError): pass
             
-    # Единица измерения (очень важный параметр для цены)
-    # Находим активный таб с единицей измерения
     active_unit_tag = card_soup.find('div', class_=lambda c: c and 'tab-active' in c and 'price-switcher-tab' in c)
     if active_unit_tag:
         data['unit'] = active_unit_tag.get_text(strip=True)
 
-    # 4. Извлечение категорий и характеристик
-
-    # "Хлебные крошки" (категории)
+    # Категории (хлебные крошки)
     breadcrumbs_div = card_soup.find('div', attrs={'data-test': 'product-breadcrumbs'})
     if breadcrumbs_div:
         data['categories'] = [cat.get_text(strip=True) for cat in breadcrumbs_div.find_all('a')]
@@ -126,22 +133,16 @@ def parse_product_card(card_soup):
     # Характеристики
     description_p = card_soup.find('p', attrs={'data-test': 'product-description'})
     if description_p:
-        # Преобразуем <br> в специальный разделитель, чтобы потом разбить строку
-        for br in description_p.find_all('br'):
-            br.replace_with('|||')
-        
-        # Получаем текст и разбиваем на отдельные характеристики
+        for br in description_p.find_all('br'): br.replace_with('|||')
         full_text = description_p.get_text(strip=True)
         features_list = [item.strip() for item in full_text.split('|||') if item.strip()]
-        
         for feature_item in features_list:
             if ':' in feature_item:
                 key, value = feature_item.split(':', 1)
                 data['features'][key.strip()] = value.strip()
     
-    # 5. Сериализация сложных полей в JSON для сохранения в БД
+    # Сериализация для записи в БД
     data['features'] = json.dumps(data['features'], ensure_ascii=False)
     data['categories'] = json.dumps(data['categories'], ensure_ascii=False)
 
     return data
-
